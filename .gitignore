@@ -1,0 +1,12 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+.idea/
+tools/.idea/
+
+data/
+downloads/
+
+certs/server.key
+certs/server.crt
+
