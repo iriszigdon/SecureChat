@@ -13,6 +13,8 @@ It includes:
 - Chat rooms and message history.
 - Emoji messages.
 - File, image, and video sending.
+- Inline image preview inside the chat screen.
+- Clickable file/video links that open the received file.
 - SQLite file-based storage.
 - A Tkinter graphical client.
 - Audit logs for important server events.
@@ -61,6 +63,8 @@ python tools/create_dev_certificate.py
 10. Restart a client and show that message history is loaded from SQLite.
 
 Received media files are saved automatically in the `downloads` folder.
+Images are shown as previews in the chat.
+Files and videos appear as clickable links that open the saved file.
 The server also saves uploaded media in `data/uploads`.
 
 ## Security Notes

@@ -1,13 +1,18 @@
 import argparse
 import base64
 import mimetypes
+import os
 import queue
 import socket
 import ssl
+import subprocess
+import sys
 import threading
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, scrolledtext, ttk
+
+from PIL import Image, ImageTk
 
 from secure_chat.config import DEFAULT_HOST, DEFAULT_PORT, DOWNLOAD_DIR, MAX_FILE_SIZE
 from secure_chat.protocol import ChatProtocol, ProtocolError
@@ -68,6 +73,8 @@ class SecureChatApp(tk.Tk):
         self.logged_in = False
         self.current_room = "general"
         self.current_screen = "auth"
+        self.chat_images: list[ImageTk.PhotoImage] = []
+        self.chat_links: dict[str, Path] = {}
 
         self._build_ui()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -642,10 +649,11 @@ class SecureChatApp(tk.Tk):
         DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
         save_path = self._unique_download_path(filename)
         save_path.write_bytes(file_data)
-        self._append_chat(
-            f"[{created_at}] {sender} sent {kind}: {filename} "
-            f"(saved to {save_path})"
-        )
+
+        if kind == "image":
+            self._append_image_preview(created_at, sender, filename, save_path)
+        else:
+            self._append_clickable_file(created_at, sender, kind, filename, save_path)
 
     def _unique_download_path(self, filename: str) -> Path:
         path = DOWNLOAD_DIR / filename
@@ -660,6 +668,67 @@ class SecureChatApp(tk.Tk):
             if not candidate.exists():
                 return candidate
             counter += 1
+
+    def _append_image_preview(
+        self,
+        created_at: str,
+        sender: str,
+        filename: str,
+        save_path: Path,
+    ) -> None:
+        self._append_clickable_file(created_at, sender, "image", filename, save_path)
+
+        try:
+            image = Image.open(save_path)
+            image.thumbnail((320, 220))
+            preview = ImageTk.PhotoImage(image)
+        except Exception as exc:
+            self._append_chat(f"Could not show image preview: {exc}")
+            return
+
+        self.chat_images.append(preview)
+        self.chat_box.configure(state=tk.NORMAL)
+        self.chat_box.image_create(tk.END, image=preview)
+        self.chat_box.insert(tk.END, "\n")
+        self.chat_box.configure(state=tk.DISABLED)
+        self.chat_box.see(tk.END)
+
+    def _append_clickable_file(
+        self,
+        created_at: str,
+        sender: str,
+        kind: str,
+        filename: str,
+        save_path: Path,
+    ) -> None:
+        link_tag = f"link_{len(self.chat_links)}"
+        self.chat_links[link_tag] = save_path
+
+        self.chat_box.configure(state=tk.NORMAL)
+        self.chat_box.insert(tk.END, f"[{created_at}] {sender} sent {kind}: ")
+        self.chat_box.insert(tk.END, filename, (link_tag,))
+        self.chat_box.insert(tk.END, " (click to open)\n")
+        self.chat_box.tag_configure(link_tag, foreground="#2563eb", underline=True)
+        self.chat_box.tag_bind(link_tag, "<Button-1>", lambda _event, tag=link_tag: self._open_chat_link(tag))
+        self.chat_box.tag_bind(link_tag, "<Enter>", lambda _event: self.chat_box.configure(cursor="hand2"))
+        self.chat_box.tag_bind(link_tag, "<Leave>", lambda _event: self.chat_box.configure(cursor=""))
+        self.chat_box.configure(state=tk.DISABLED)
+        self.chat_box.see(tk.END)
+
+    def _open_chat_link(self, link_tag: str) -> None:
+        path = self.chat_links.get(link_tag)
+        if path is None:
+            return
+
+        try:
+            if os.name == "nt":
+                os.startfile(path)
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", str(path)])
+            else:
+                subprocess.Popen(["xdg-open", str(path)])
+        except Exception as exc:
+            self._set_chat_status(f"Could not open file: {exc}", ok=False)
 
     def _append_chat(self, text: str) -> None:
         self.chat_box.configure(state=tk.NORMAL)
