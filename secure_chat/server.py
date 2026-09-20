@@ -3,6 +3,8 @@ import argparse
 # Remark: imports a module or object needed by this file.
 import base64
 # Remark: imports a module or object needed by this file.
+import random
+# Remark: imports a module or object needed by this file.
 import socket
 # Remark: imports a module or object needed by this file.
 import threading
@@ -128,6 +130,34 @@ class ClientHandler(threading.Thread):
                 # Remark: runs this instruction as part of the program logic.
                 self._file(packet)
             # Remark: checks another possible condition.
+            elif packet_type == "command":
+                # Remark: runs this instruction as part of the program logic.
+                self._require_login()
+                # Remark: runs this instruction as part of the program logic.
+                self._command(packet)
+            # Remark: checks another possible condition.
+            elif packet_type == "typing":
+                # Remark: runs this instruction as part of the program logic.
+                self._require_login()
+                # Remark: runs this instruction as part of the program logic.
+                self.server.broadcast_typing(self.username or "", self.room)
+            # Remark: checks another possible condition.
+            elif packet_type == "read_receipt":
+                # Remark: runs this instruction as part of the program logic.
+                self._require_login()
+                # Remark: runs this instruction as part of the program logic.
+                self.server.broadcast_system(f"{self.username} read the latest messages", self.room)
+            # Remark: checks another possible condition.
+            elif packet_type == "download_event":
+                # Remark: runs this instruction as part of the program logic.
+                self._require_login()
+                # Remark: creates or updates a program value.
+                filename = InputValidator.filename(str(packet.get("filename", "")))
+                # Remark: runs this instruction as part of the program logic.
+                self.server.database.record_download(self.username or "", filename)
+                # Remark: runs this instruction as part of the program logic.
+                self.server.database.log_event("download", f"{self.username} opened {filename}")
+            # Remark: checks another possible condition.
             elif packet_type == "users":
                 # Remark: runs this instruction as part of the program logic.
                 self._require_login()
@@ -205,11 +235,19 @@ class ClientHandler(threading.Thread):
         # Remark: creates or updates a program value.
         old_room = self.room
         # Remark: creates or updates a program value.
-        requested_room = InputValidator.room(str(packet.get("room", "general")))
+        requested_room, password = self._split_room_password(str(packet.get("room", "general")))
+        # Remark: creates or updates a program value.
+        requested_room = InputValidator.room(requested_room)
         # Remark: checks a condition before continuing.
         if not self.server.database.room_exists(requested_room):
             # Remark: sends data or connects a GUI action.
             self.send("error", action="join", message="Room does not exist. Create it first.")
+            # Remark: returns a value to the caller.
+            return
+        # Remark: checks a condition before continuing.
+        if not self.server.database.can_join_room(requested_room, password):
+            # Remark: sends data or connects a GUI action.
+            self.send("error", action="join", message="Room password is incorrect.")
             # Remark: returns a value to the caller.
             return
 
@@ -231,9 +269,13 @@ class ClientHandler(threading.Thread):
         # Remark: checks an assumption that should be true.
         assert self.username is not None
         # Remark: creates or updates a program value.
-        room = InputValidator.room(str(packet.get("room", "")))
+        room_text = str(packet.get("room", ""))
         # Remark: creates or updates a program value.
-        created = self.server.database.create_room(room, self.username)
+        room, password = self._split_room_password(room_text)
+        # Remark: creates or updates a program value.
+        room = InputValidator.room(room)
+        # Remark: creates or updates a program value.
+        created = self.server.database.create_room(room, self.username, password)
 
         # Remark: checks a condition before continuing.
         if not created:
@@ -246,6 +288,17 @@ class ClientHandler(threading.Thread):
         self.send("ok", action="create_room", room=room, message=f"Room {room} created")
         # Remark: runs this instruction as part of the program logic.
         self.server.broadcast_rooms()
+
+    # Remark: defines a function or method.
+    def _split_room_password(self, room_text: str) -> tuple[str, str]:
+        # Remark: checks a condition before continuing.
+        if ":" not in room_text:
+            # Remark: returns a value to the caller.
+            return room_text, ""
+        # Remark: creates or updates a program value.
+        room, password = room_text.split(":", 1)
+        # Remark: returns a value to the caller.
+        return room, password
 
     # Remark: defines a function or method.
     def _message(self, packet: dict[str, object]) -> None:
@@ -266,10 +319,10 @@ class ClientHandler(threading.Thread):
             created_at=now_iso(),
         # Remark: closes a multi-line expression.
         )
+        # Remark: creates or updates a program value.
+        message_id = self.server.database.save_message(message)
         # Remark: runs this instruction as part of the program logic.
-        self.server.database.save_message(message)
-        # Remark: runs this instruction as part of the program logic.
-        self.server.broadcast_chat(message)
+        self.server.broadcast_chat(message, message_id)
 
     # Remark: defines a function or method.
     def _file(self, packet: dict[str, object]) -> None:
@@ -340,6 +393,189 @@ class ClientHandler(threading.Thread):
             created_at=created_at,
         # Remark: closes a multi-line expression.
         )
+
+    # Remark: defines a function or method.
+    def _command(self, packet: dict[str, object]) -> None:
+        # Remark: checks an assumption that should be true.
+        assert self.username is not None
+        # Remark: creates or updates a program value.
+        command = str(packet.get("body", "")).strip()
+        # Remark: creates or updates a program value.
+        parts = command.split(" ", 2)
+        # Remark: creates or updates a program value.
+        name = parts[0].lower() if parts else ""
+
+        # Remark: checks a condition before continuing.
+        if name == "/dm" and len(parts) == 3:
+            # Remark: runs this instruction as part of the program logic.
+            self.server.send_private_message(self.username, parts[1], parts[2])
+        # Remark: checks another possible condition.
+        elif name == "/profile" and len(parts) >= 2:
+            # Remark: runs this instruction as part of the program logic.
+            self._profile_command(parts)
+        # Remark: checks another possible condition.
+        elif name == "/search" and len(parts) >= 2:
+            # Remark: creates or updates a program value.
+            term = command.split(" ", 1)[1]
+            # Remark: runs this instruction as part of the program logic.
+            self._advanced_response("Search results", self.server.database.search_messages(self.room, term))
+        # Remark: checks another possible condition.
+        elif name == "/friend" and len(parts) >= 2:
+            # Remark: creates or updates a program value.
+            ok = self.server.database.send_friend_request(self.username, parts[1])
+            # Remark: runs this instruction as part of the program logic.
+            self._advanced_response("Friend request", ["Sent" if ok else "Request already exists"])
+        # Remark: checks another possible condition.
+        elif name == "/accept" and len(parts) >= 2:
+            # Remark: creates or updates a program value.
+            ok = self.server.database.accept_friend_request(parts[1], self.username)
+            # Remark: runs this instruction as part of the program logic.
+            self._advanced_response("Friend request", ["Accepted" if ok else "No pending request found"])
+        # Remark: checks another possible condition.
+        elif name == "/friends":
+            # Remark: runs this instruction as part of the program logic.
+            self._advanced_response("Friends", self.server.database.list_friends(self.username))
+        # Remark: checks another possible condition.
+        elif name == "/gallery":
+            # Remark: runs this instruction as part of the program logic.
+            self._advanced_response("Image gallery", self.server.database.image_gallery(self.room))
+        # Remark: checks another possible condition.
+        elif name == "/admin" and len(parts) >= 2:
+            # Remark: runs this instruction as part of the program logic.
+            self._admin_command(command)
+        # Remark: checks another possible condition.
+        elif name == "/kick" and len(parts) >= 2:
+            # Remark: runs this instruction as part of the program logic.
+            self._kick_command(parts[1])
+        # Remark: checks another possible condition.
+        elif name == "/edit" and len(parts) == 3:
+            # Remark: runs this instruction as part of the program logic.
+            self._edit_command(parts[1], parts[2])
+        # Remark: checks another possible condition.
+        elif name == "/delete" and len(parts) >= 2:
+            # Remark: runs this instruction as part of the program logic.
+            self._delete_command(parts[1])
+        # Remark: checks another possible condition.
+        elif name == "/2fa":
+            # Remark: creates or updates a program value.
+            code = f"{random.randint(0, 999999):06d}"
+            # Remark: runs this instruction as part of the program logic.
+            self.server.database.log_event("2fa", f"{self.username} generated demo 2FA code {code}")
+            # Remark: runs this instruction as part of the program logic.
+            self._advanced_response("Demo 2FA", [f"Your one-time demo code is {code}"])
+        # Remark: handles the case where previous conditions were false.
+        else:
+            # Remark: runs this instruction as part of the program logic.
+            self._advanced_response("Unknown command", [self._command_help()])
+
+    # Remark: defines a function or method.
+    def _profile_command(self, parts: list[str]) -> None:
+        # Remark: checks an assumption that should be true.
+        assert self.username is not None
+        # Remark: checks a condition before continuing.
+        if parts[1].lower() == "set" and len(parts) == 3:
+            # Remark: runs this instruction as part of the program logic.
+            self.server.database.update_profile(self.username, parts[2])
+            # Remark: runs this instruction as part of the program logic.
+            self._advanced_response("Profile", ["Profile status updated"])
+            # Remark: returns a value to the caller.
+            return
+        # Remark: creates or updates a program value.
+        target = parts[1]
+        # Remark: runs this instruction as part of the program logic.
+        self._advanced_response("Profile", [f"{target}: {self.server.database.get_profile(target)}"])
+
+    # Remark: defines a function or method.
+    def _admin_command(self, command: str) -> None:
+        # Remark: checks an assumption that should be true.
+        assert self.username is not None
+        # Remark: checks a condition before continuing.
+        if not self.server.database.is_admin(self.username):
+            # Remark: runs this instruction as part of the program logic.
+            self._advanced_response("Admin", ["Only admin users can run this command"])
+            # Remark: returns a value to the caller.
+            return
+        # Remark: checks a condition before continuing.
+        if command.strip().lower() == "/admin logs":
+            # Remark: runs this instruction as part of the program logic.
+            self._advanced_response("Admin logs", self.server.database.audit_events())
+        # Remark: handles the case where previous conditions were false.
+        else:
+            # Remark: runs this instruction as part of the program logic.
+            self._advanced_response("Admin", ["/admin logs"])
+
+    # Remark: defines a function or method.
+    def _kick_command(self, target: str) -> None:
+        # Remark: checks an assumption that should be true.
+        assert self.username is not None
+        # Remark: checks a condition before continuing.
+        if not self.server.database.is_admin(self.username):
+            # Remark: runs this instruction as part of the program logic.
+            self._advanced_response("Admin", ["Only admin users can kick users"])
+            # Remark: returns a value to the caller.
+            return
+        # Remark: creates or updates a program value.
+        kicked = self.server.kick_user(target)
+        # Remark: runs this instruction as part of the program logic.
+        self._advanced_response("Admin", [f"Kicked {target}" if kicked else "User is not online"])
+
+    # Remark: defines a function or method.
+    def _edit_command(self, message_id_text: str, body: str) -> None:
+        # Remark: checks an assumption that should be true.
+        assert self.username is not None
+        # Remark: checks a condition before continuing.
+        if not message_id_text.isdigit():
+            # Remark: runs this instruction as part of the program logic.
+            self._advanced_response("Edit message", ["Message id must be a number"])
+            # Remark: returns a value to the caller.
+            return
+        # Remark: starts a multi-line expression.
+        ok = self.server.database.edit_message(
+            # Remark: runs this instruction as part of the program logic.
+            int(message_id_text),
+            # Remark: runs this instruction as part of the program logic.
+            self.username,
+            # Remark: runs this instruction as part of the program logic.
+            body,
+            # Remark: runs this instruction as part of the program logic.
+            self.server.database.is_admin(self.username),
+        # Remark: closes a multi-line expression.
+        )
+        # Remark: runs this instruction as part of the program logic.
+        self._advanced_response("Edit message", ["Message edited" if ok else "Cannot edit that message"])
+
+    # Remark: defines a function or method.
+    def _delete_command(self, message_id_text: str) -> None:
+        # Remark: checks an assumption that should be true.
+        assert self.username is not None
+        # Remark: checks a condition before continuing.
+        if not message_id_text.isdigit():
+            # Remark: runs this instruction as part of the program logic.
+            self._advanced_response("Delete message", ["Message id must be a number"])
+            # Remark: returns a value to the caller.
+            return
+        # Remark: starts a multi-line expression.
+        ok = self.server.database.delete_message(
+            # Remark: runs this instruction as part of the program logic.
+            int(message_id_text),
+            # Remark: runs this instruction as part of the program logic.
+            self.username,
+            # Remark: runs this instruction as part of the program logic.
+            self.server.database.is_admin(self.username),
+        # Remark: closes a multi-line expression.
+        )
+        # Remark: runs this instruction as part of the program logic.
+        self._advanced_response("Delete message", ["Message deleted" if ok else "Cannot delete that message"])
+
+    # Remark: defines a function or method.
+    def _advanced_response(self, title: str, lines: list[str]) -> None:
+        # Remark: sends data or connects a GUI action.
+        self.send("advanced_response", title=title, lines=lines or ["No results"])
+
+    # Remark: defines a function or method.
+    def _command_help(self) -> str:
+        # Remark: returns a value to the caller.
+        return "/dm user text, /profile set text, /profile user, /search text, /friend user, /accept user, /friends, /gallery, /admin logs, /kick user, /edit id text, /delete id, /2fa"
 
     # Remark: defines a function or method.
     def _users(self) -> None:
@@ -482,9 +718,11 @@ class SecureChatServer:
             self.database.log_event("disconnect", f"{client.username} disconnected")
 
     # Remark: defines a function or method.
-    def broadcast_chat(self, message: ChatMessage) -> None:
+    def broadcast_chat(self, message: ChatMessage, message_id: int) -> None:
         # Remark: starts a multi-line expression.
         payload = {
+            # Remark: runs this instruction as part of the program logic.
+            "id": message_id,
             # Remark: runs this instruction as part of the program logic.
             "sender": message.sender,
             # Remark: runs this instruction as part of the program logic.
@@ -545,6 +783,75 @@ class SecureChatServer:
     def broadcast_system(self, text: str, room: str) -> None:
         # Remark: creates or updates a program value.
         self._broadcast_to_room(room, "system", room=room, message=text, created_at=now_iso())
+
+    # Remark: defines a function or method.
+    def broadcast_typing(self, username: str, room: str) -> None:
+        # Remark: creates or updates a program value.
+        self._broadcast_to_room(room, "typing", username=username, room=room)
+
+    # Remark: defines a function or method.
+    def send_private_message(self, sender: str, target: str, body: str) -> None:
+        # Remark: creates or updates a program value.
+        delivered = False
+        # Remark: uses a managed resource safely.
+        with self.clients_lock:
+            # Remark: creates or updates a program value.
+            clients = [client for client in self.clients if client.username in {sender, target}]
+
+        # Remark: starts a loop over multiple values.
+        for client in clients:
+            # Remark: starts protected code that may raise an error.
+            try:
+                # Remark: sends data or connects a GUI action.
+                client.send("private_message", sender=sender, target=target, body=body, created_at=now_iso())
+                # Remark: creates or updates a program value.
+                delivered = True
+            # Remark: handles an expected error safely.
+            except OSError:
+                # Remark: creates or updates a program value.
+                client.running = False
+
+        # Remark: runs this instruction as part of the program logic.
+        self.database.log_event("private_message", f"{sender} sent private message to {target}")
+        # Remark: checks a condition before continuing.
+        if not delivered:
+            # Remark: runs this instruction as part of the program logic.
+            self.send_system_to_user(sender, f"User {target} is not online")
+
+    # Remark: defines a function or method.
+    def send_system_to_user(self, username: str, text: str) -> None:
+        # Remark: uses a managed resource safely.
+        with self.clients_lock:
+            # Remark: creates or updates a program value.
+            clients = [client for client in self.clients if client.username == username]
+
+        # Remark: starts a loop over multiple values.
+        for client in clients:
+            # Remark: sends data or connects a GUI action.
+            client.send("system", room=client.room, message=text, created_at=now_iso())
+
+    # Remark: defines a function or method.
+    def kick_user(self, username: str) -> bool:
+        # Remark: uses a managed resource safely.
+        with self.clients_lock:
+            # Remark: creates or updates a program value.
+            targets = [client for client in self.clients if client.username == username]
+
+        # Remark: starts a loop over multiple values.
+        for client in targets:
+            # Remark: sends data or connects a GUI action.
+            client.send("error", action="kick", message="You were kicked by an admin")
+            # Remark: creates or updates a program value.
+            client.running = False
+            # Remark: runs this instruction as part of the program logic.
+            client._safe_close()
+
+        # Remark: checks a condition before continuing.
+        if targets:
+            # Remark: runs this instruction as part of the program logic.
+            self.database.log_event("kick", f"{username} was kicked by admin")
+        # Remark: returns a value to the caller.
+        return bool(targets)
 
     # Remark: defines a function or method.
     def broadcast_rooms(self) -> None:

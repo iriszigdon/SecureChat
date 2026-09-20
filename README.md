@@ -15,6 +15,18 @@ It includes:
 - File, image, and video sending.
 - Inline image preview inside the chat screen.
 - Clickable file/video links that open the received file.
+- Private messages.
+- User profiles.
+- Message search.
+- Typing indicators.
+- Read receipts as room system events.
+- Friend requests and friend lists.
+- Room passwords.
+- Admin/security dashboard commands.
+- Admin kick command.
+- Message editing and deleting by message id.
+- Demo two-factor code generation.
+- Image gallery command.
 - SQLite file-based storage.
 - A Tkinter graphical client.
 - Audit logs for important server events.
@@ -66,6 +78,34 @@ Received media files are saved automatically in the `downloads` folder.
 Images are shown as previews in the chat.
 Files and videos appear as clickable links that open the saved file.
 The server also saves uploaded media in `data/uploads`.
+
+## Advanced Commands
+
+Write these in the message box and press **Send**:
+
+```text
+/dm USER MESSAGE
+/profile set TEXT
+/profile USER
+/search TEXT
+/friend USER
+/accept USER
+/friends
+/gallery
+/admin logs
+/kick USER
+/edit MESSAGE_ID TEXT
+/delete MESSAGE_ID
+/2fa
+```
+
+Password rooms use this format when creating or joining:
+
+```text
+room_name:password
+```
+
+The first registered user is an admin. A user named `admin` is also admin.
 
 ## Security Notes
 

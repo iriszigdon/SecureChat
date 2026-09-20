@@ -19,6 +19,8 @@ import sys
 # Remark: imports a module or object needed by this file.
 import threading
 # Remark: imports a module or object needed by this file.
+import time
+# Remark: imports a module or object needed by this file.
 import tkinter as tk
 # Remark: imports a module or object needed by this file.
 from pathlib import Path
@@ -142,6 +144,8 @@ class SecureChatApp(tk.Tk):
         self.chat_images: list[ImageTk.PhotoImage] = []
         # Remark: creates or updates a program value.
         self.chat_links: dict[str, Path] = {}
+        # Remark: creates or updates a program value.
+        self.last_typing_sent = 0.0
 
         # Remark: runs this instruction as part of the program logic.
         self._build_ui()
@@ -557,6 +561,8 @@ class SecureChatApp(tk.Tk):
         message_entry.grid(row=0, column=0, sticky="ew", ipady=8, padx=(0, 8))
         # Remark: runs this instruction as part of the program logic.
         message_entry.bind("<Return>", lambda _event: self._send_message())
+        # Remark: runs this instruction as part of the program logic.
+        message_entry.bind("<KeyRelease>", lambda _event: self._send_typing_notice())
         # Remark: starts a multi-line expression.
         tk.Button(
             # Remark: runs this instruction as part of the program logic.
@@ -663,6 +669,26 @@ class SecureChatApp(tk.Tk):
             padx=10,
         # Remark: closes a multi-line expression.
         ).pack(side=tk.LEFT, padx=5)
+        # Remark: starts a multi-line expression.
+        tk.Button(
+            # Remark: runs this instruction as part of the program logic.
+            media_frame,
+            # Remark: creates or updates a program value.
+            text="Commands Help",
+            # Remark: creates or updates a program value.
+            command=self._show_commands_help,
+            # Remark: creates or updates a program value.
+            bg="#0f172a",
+            # Remark: creates or updates a program value.
+            fg="white",
+            # Remark: creates or updates a program value.
+            relief=tk.FLAT,
+            # Remark: creates or updates a program value.
+            font=("Segoe UI", 10, "bold"),
+            # Remark: creates or updates a program value.
+            padx=10,
+        # Remark: closes a multi-line expression.
+        ).pack(side=tk.LEFT, padx=12)
 
         # Remark: creates or updates a program value.
         users_panel = tk.Frame(self.chat_frame, bg="#ecfdf5", padx=10, pady=10)
@@ -861,14 +887,84 @@ class SecureChatApp(tk.Tk):
 
         # Remark: starts protected code that may raise an error.
         try:
-            # Remark: sends data or connects a GUI action.
-            self.connection.send("message", body=body)
+            # Remark: checks a condition before continuing.
+            if body.strip().startswith("/"):
+                # Remark: sends data or connects a GUI action.
+                self.connection.send("command", body=body.strip())
+            # Remark: handles the case where previous conditions were false.
+            else:
+                # Remark: sends data or connects a GUI action.
+                self.connection.send("message", body=body)
             # Remark: runs this instruction as part of the program logic.
             self.message_var.set("")
         # Remark: handles an expected error safely.
         except Exception as exc:
             # Remark: creates or updates a program value.
             self._set_chat_status(f"Send failed: {exc}", ok=False)
+
+    # Remark: defines a function or method.
+    def _send_typing_notice(self) -> None:
+        # Remark: checks a condition before continuing.
+        if not self.logged_in:
+            # Remark: returns a value to the caller.
+            return
+
+        # Remark: creates or updates a program value.
+        current_time = time.time()
+        # Remark: checks a condition before continuing.
+        if current_time - self.last_typing_sent < 2:
+            # Remark: returns a value to the caller.
+            return
+
+        # Remark: creates or updates a program value.
+        self.last_typing_sent = current_time
+        # Remark: starts protected code that may raise an error.
+        try:
+            # Remark: sends data or connects a GUI action.
+            self.connection.send("typing")
+        # Remark: handles an expected error safely.
+        except Exception:
+            # Remark: runs this instruction as part of the program logic.
+            pass
+
+    # Remark: defines a function or method.
+    def _show_commands_help(self) -> None:
+        # Remark: starts a multi-line expression.
+        commands = (
+            # Remark: runs this instruction as part of the program logic.
+            "Advanced commands:\\n"
+            # Remark: runs this instruction as part of the program logic.
+            "/dm USER MESSAGE - private message\\n"
+            # Remark: runs this instruction as part of the program logic.
+            "/profile set TEXT - update your profile\\n"
+            # Remark: runs this instruction as part of the program logic.
+            "/profile USER - view profile\\n"
+            # Remark: runs this instruction as part of the program logic.
+            "/search TEXT - search current room\\n"
+            # Remark: runs this instruction as part of the program logic.
+            "/friend USER - send friend request\\n"
+            # Remark: runs this instruction as part of the program logic.
+            "/accept USER - accept friend request\\n"
+            # Remark: runs this instruction as part of the program logic.
+            "/friends - list friends\\n"
+            # Remark: runs this instruction as part of the program logic.
+            "/gallery - show room image history\\n"
+            # Remark: runs this instruction as part of the program logic.
+            "/admin logs - security/admin dashboard\\n"
+            # Remark: runs this instruction as part of the program logic.
+            "/kick USER - admin kick\\n"
+            # Remark: runs this instruction as part of the program logic.
+            "/edit MESSAGE_ID TEXT - edit message\\n"
+            # Remark: runs this instruction as part of the program logic.
+            "/delete MESSAGE_ID - delete message\\n"
+            # Remark: runs this instruction as part of the program logic.
+            "/2fa - generate demo 2FA code\\n"
+            # Remark: runs this instruction as part of the program logic.
+            "Password rooms: create/join as room:password"
+        # Remark: closes a multi-line expression.
+        )
+        # Remark: runs this instruction as part of the program logic.
+        messagebox.showinfo("SecureChat Commands", commands)
 
     # Remark: defines a function or method.
     def _insert_emoji(self, emoji: str) -> None:
@@ -982,13 +1078,31 @@ class SecureChatApp(tk.Tk):
             # Remark: starts a multi-line expression.
             self._append_chat(
                 # Remark: runs this instruction as part of the program logic.
-                f"[{packet.get('created_at')}] {packet.get('sender')}: {packet.get('body')}"
+                f"[{packet.get('created_at')}] #{packet.get('id', '?')} {packet.get('sender')}: {packet.get('body')}"
             # Remark: closes a multi-line expression.
             )
+            # Remark: sends data or connects a GUI action.
+            self.connection.send("read_receipt")
         # Remark: checks another possible condition.
         elif packet_type == "file":
             # Remark: runs this instruction as part of the program logic.
             self._handle_file_packet(packet)
+        # Remark: checks another possible condition.
+        elif packet_type == "private_message":
+            # Remark: starts a multi-line expression.
+            self._append_chat(
+                # Remark: runs this instruction as part of the program logic.
+                f"[{packet.get('created_at')}] PRIVATE {packet.get('sender')} -> {packet.get('target')}: {packet.get('body')}"
+            # Remark: closes a multi-line expression.
+            )
+        # Remark: checks another possible condition.
+        elif packet_type == "advanced_response":
+            # Remark: runs this instruction as part of the program logic.
+            self._show_advanced_response(packet)
+        # Remark: checks another possible condition.
+        elif packet_type == "typing":
+            # Remark: creates or updates a program value.
+            self._set_chat_status(f"{packet.get('username')} is typing...", ok=True)
         # Remark: checks another possible condition.
         elif packet_type == "system":
             # Remark: runs this instruction as part of the program logic.
@@ -1205,6 +1319,25 @@ class SecureChatApp(tk.Tk):
             self.room_var.set(self.rooms_box.get(selection[0]))
 
     # Remark: defines a function or method.
+    def _show_advanced_response(self, packet: dict[str, object]) -> None:
+        # Remark: creates or updates a program value.
+        title = str(packet.get("title", "Advanced response"))
+        # Remark: creates or updates a program value.
+        lines = packet.get("lines", [])
+        # Remark: runs this instruction as part of the program logic.
+        self._append_chat(f"--- {title} ---")
+        # Remark: checks a condition before continuing.
+        if isinstance(lines, list):
+            # Remark: starts a loop over multiple values.
+            for line in lines:
+                # Remark: runs this instruction as part of the program logic.
+                self._append_chat(str(line))
+        # Remark: handles the case where previous conditions were false.
+        else:
+            # Remark: runs this instruction as part of the program logic.
+            self._append_chat(str(lines))
+
+    # Remark: defines a function or method.
     def _handle_file_packet(self, packet: dict[str, object]) -> None:
         # Remark: starts protected code that may raise an error.
         try:
@@ -1367,6 +1500,8 @@ class SecureChatApp(tk.Tk):
 
         # Remark: starts protected code that may raise an error.
         try:
+            # Remark: sends data or connects a GUI action.
+            self.connection.send("download_event", filename=path.name)
             # Remark: checks a condition before continuing.
             if os.name == "nt":
                 # Remark: runs this instruction as part of the program logic.

@@ -4,6 +4,7 @@ __pycache__/
 .idea/
 tools/.idea/
 tools/.venv/
+secure_chat/book/
 
 data/
 downloads/
